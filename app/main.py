@@ -84,7 +84,13 @@ class RateLimiter:
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        get_settings().ensure_storage_directories()
+        settings = get_settings()
+        settings.ensure_storage_directories()
+        if settings.warm_start:
+            # Load index and models in the background; requests arriving earlier simply wait for them.
+            import threading
+
+            threading.Thread(target=get_chat_service, daemon=True).start()
         yield
 
     app = FastAPI(
@@ -148,6 +154,9 @@ def create_app() -> FastAPI:
     @app.post("/api/chat", tags=["chat"])
     def chat(body: ChatRequest, request: Request, service=Depends(get_chat_service)):
         client = request.client.host if request.client else "unknown"
+        forwarded = request.headers.get("x-forwarded-for")
+        if get_settings().trust_proxy_headers and forwarded:
+            client = forwarded.split(",")[0].strip()  # behind a proxy, every visitor shares its address
         if not limiter.allow(client):
             return JSONResponse(
                 status_code=429,

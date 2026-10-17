@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     sarvam_timeout_seconds: float = Field(default=90.0, gt=0)
     llm_timeout_seconds: float = Field(default=45.0, gt=0)
     chat_rate_limit_per_minute: int = Field(default=20, ge=1)
+    # Fresh (non-cached) model answers allowed per day across all visitors; protects free-tier quotas.
+    daily_answer_limit: int = Field(default=300, ge=1)
+    # Trust X-Forwarded-For for per-visitor rate limits (set when running behind a proxy, e.g. Hugging Face).
+    trust_proxy_headers: bool = False
+    # Load the index and models at startup so the first visitor doesn't wait.
+    warm_start: bool = False
     bge_model: str = "BAAI/bge-small-en-v1.5"
     reranker_model: str = "BAAI/bge-reranker-base"
     # Minimum cross-encoder relevance probability for a chunk to count as evidence.

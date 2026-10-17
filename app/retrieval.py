@@ -17,7 +17,7 @@ import numpy as np
 from app.chunker import FACT_TAG_PATTERNS, Chunk, numbers_in
 from app.config import Settings, get_settings
 from app.index import BgeEmbedder, CorpusIndex, Embedder, keyword_tokens, load_index, passage_text
-from app.query import ConversationContext, QueryAnalysis, SchemeMatch, analyse_query
+from app.query import ConversationContext, QueryAnalysis, SchemeMatch, analyse_query, detect_facts
 from app.registry import SourceRegistry, load_registry
 
 CANDIDATES_PER_RETRIEVER = 30
@@ -193,7 +193,10 @@ def search_query(analysis: QueryAnalysis, scheme_id: str | None, registry: Sourc
         return analysis.query
     scheme_name = registry.scheme_map[scheme_id].scheme_name
     match = next(m for m in analysis.schemes if m.scheme_id == scheme_id)
-    if (len(analysis.schemes) > 1 or match.from_context) and analysis.facts:
+    # Facts carried from an earlier turn ("and Large Cap?") are not in the words of this question,
+    # so the search must name them explicitly.
+    facts_not_in_question = bool(analysis.facts) and not set(analysis.facts) <= set(detect_facts(analysis.query))
+    if (len(analysis.schemes) > 1 or match.from_context or facts_not_in_question) and analysis.facts:
         return f"What is the {' and '.join(FACT_LABELS[fact] for fact in analysis.facts)} of {scheme_name}?"
     rewritten = re.sub(r"\s+".join(map(re.escape, match.matched_text.split())), scheme_name, analysis.query, count=1, flags=re.IGNORECASE)
     # Matching works on normalised text ("large and mid cap"); fall back to appending the name.
@@ -332,11 +335,25 @@ class Retriever:
         for other in best_per_source.values():
             if values_conflict(primary_values, fact_values(other.chunk.text, facts)):
                 return "conflicting_current_sources"
+        if self._superseded(scheme_id, primary.chunk, primary_values, facts):
+            return "superseded_by_newer_source"
         corroborating = next(
             (c for c in usable if c.chunk.source_id != primary.chunk.source_id and values_agree(primary_values, fact_values(c.chunk.text, facts))),
             None,
         )
         return Evidence(scheme_id or primary.chunk.scheme_id, primary, corroborating, primary_values)
+
+    def _superseded(self, scheme_id: str, primary: Chunk, primary_values: dict[str, tuple[str, ...]], facts: list[str]) -> bool:
+        """True if a newer document of this scheme states a different value for the fact. Retrieval can
+        miss the newer chunk for an unusual phrasing; this keeps an outdated value from being shown as fact."""
+        for chunk in self.index.chunks:
+            if chunk.scheme_id != scheme_id or chunk.source_updated_date <= primary.source_updated_date:
+                continue
+            if not set(facts) & set(chunk.fact_tags) or not states_required_values(chunk.text, facts):
+                continue
+            if values_conflict(primary_values, fact_values(chunk.text, facts)):
+                return True
+        return False
 
     def _retrieve_overview(self, analysis: QueryAnalysis, fallback: str | None) -> RetrievalResult:
         """"Tell me about <scheme>": each overview fact is searched and gated on its own, so the

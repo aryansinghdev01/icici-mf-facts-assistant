@@ -103,13 +103,20 @@ def test_same_date_conflict_is_unverified() -> None:
 
 
 def test_ocr_value_not_confirmed_by_second_pass_is_not_evidence() -> None:
+    # The newer factsheet's value can't be confirmed, and it differs from the older KIM, so neither is
+    # stated: the older value may be outdated and the newer one may be misread.
     result = retriever([
         chunk("icici_flexicap_kim", "Exit load: 1% if redeemed within 12 months.", day=OLD),
         chunk("icici_flexicap_factsheet", "Exit load: 7% if redeemed within one month.", day=NEW, ocr_unconfirmed=("7",)),
     ]).retrieve(QUERY)
+    assert (result.status, result.reason) == ("unverified", "superseded_by_newer_source")
 
-    assert result.status == "verified"
-    assert result.evidence[0].primary.chunk.source_id == "icici_flexicap_kim"
+    # When the newer document doesn't state the value at all, the older confirmed value is used.
+    silent = retriever([
+        chunk("icici_flexicap_kim", "Exit load: 1% if redeemed within 12 months.", day=OLD),
+        chunk("icici_flexicap_factsheet", "Exit load: please refer to the scheme information document.", day=NEW),
+    ]).retrieve(QUERY)
+    assert silent.status == "verified" and silent.evidence[0].primary.chunk.source_id == "icici_flexicap_kim"
 
 
 def test_mention_without_a_stated_value_is_not_evidence() -> None:
@@ -300,3 +307,21 @@ def test_naming_the_same_scheme_again_gives_its_overview_not_the_previous_fact()
     assert analyse_query("Silver ETF FoF", registry_, previous).overview
     switched = analyse_query("and Large Cap?", registry_, ConversationContext(("icici_flexicap",), ("exit_load",)))
     assert (switched.scheme_ids, switched.facts) == (["icici_large_cap"], ["exit_load"])
+
+
+def test_older_value_is_not_shown_when_a_newer_document_states_a_different_one() -> None:
+    newer = chunk("icici_flexicap_factsheet", "Exit load: 1% if redeemed within one month from allotment.", day=NEW)
+    older = chunk("icici_flexicap_kim", "Exit load: 1% if redeemed within 12 months from allotment.", day=OLD)
+    r = retriever([older, newer])
+    # Simulate retrieval missing the newer chunk: only the older one reaches the gate.
+    outcome = r._gate_scheme("icici_flexicap", [c for c in r._candidates(analyse_query(QUERY, r.registry), "icici_flexicap")[0] if c.chunk.source_id == "icici_flexicap_kim"], ["exit_load"])
+    assert outcome == "superseded_by_newer_source"
+
+
+def test_follow_up_fact_is_named_in_the_search_query() -> None:
+    from app.query import ConversationContext
+    from app.retrieval import search_query
+
+    r = retriever([])
+    analysis = analyse_query("and Large Cap?", r.registry, ConversationContext(("icici_flexicap",), ("exit_load",)))
+    assert search_query(analysis, "icici_large_cap", r.registry) == "What is the exit load of ICICI Prudential Large Cap Fund?"

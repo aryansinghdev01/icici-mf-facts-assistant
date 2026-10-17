@@ -79,6 +79,7 @@ TEMPLATES = {
         "Investor Services page linked below. This assistant can't access your account or fetch statements for you."
     ),
     "unavailable": "The answer service is temporarily unavailable, so I can't verify an answer right now. Please try again shortly.",
+    "daily_limit": "This demo has reached its daily answer limit. Please try again tomorrow, or open the official document below.",
     "document": "You can download the official {document} for {scheme} from the link below.",
     "clarify_fact": (
         "What would you like to know about {scheme}? I can answer facts such as its expense ratio, exit load, minimum "
@@ -216,6 +217,7 @@ class ChatService:
         self.audit_log = audit_log or self.settings.resolved_path(self.settings.logs_dir) / "chat_events.jsonl"
         # Verified factual answers only, keyed by the normalised question; memory-only and short-lived.
         self._cache: dict[str, tuple[float, ChatResponse]] = {}
+        self._fresh_answers: tuple[str, int] = ("", 0)  # (UTC date, fresh model answers that day)
 
     # -- public entry point ------------------------------------------------------------------
     def answer(self, question: object, context: ConversationContext | None = None) -> ChatResponse:
@@ -290,6 +292,12 @@ class ChatService:
         return response
 
     def _generate_uncached(self, question: str, result: RetrievalResult) -> ChatResponse:
+        today = datetime.now(UTC).date().isoformat()
+        day, used = self._fresh_answers if self._fresh_answers[0] == today else (today, 0)
+        if used >= self.settings.daily_answer_limit:
+            response = ChatResponse(TEMPLATES["daily_limit"], "unavailable", source=self._fallback_citation(result))
+            return self._finish(response, event="daily_limit", result=result)
+        self._fresh_answers = (day, used + 1)
         passages = self._passages(result)
         user_prompt = self._user_prompt(question, result, passages)
         feedback: list[str] = []

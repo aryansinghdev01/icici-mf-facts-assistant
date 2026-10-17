@@ -445,3 +445,31 @@ def test_objective_that_mentions_returns_is_not_a_performance_claim() -> None:
     text = "Investment objective: the scheme seeks to generate returns by investing in units of ICICI Prudential Silver ETF."
     draft = DraftAnswer("The scheme seeks to generate returns by investing in units of ICICI Prudential Silver ETF.", ("S1",), True)
     assert validate_draft(draft, [passage(text)]) == []
+
+
+def test_daily_answer_limit_stops_fresh_model_calls(tmp_path: Path) -> None:
+    model = FakeModel(GOOD)
+    svc = service(tmp_path, model)
+    svc.settings = Settings(**{**svc.settings.model_dump(), "daily_answer_limit": 1, "answer_cache_seconds": 0})
+    assert svc.answer("What is the exit load of ICICI Flexicap?").response_type == "fact"
+    limited = svc.answer("What is the exit load of ICICI Prudential Flexicap Fund?")
+    assert limited.response_type == "unavailable" and "daily answer limit" in limited.answer
+    assert model.calls == 1
+
+
+def test_rate_limit_uses_forwarded_client_address_when_behind_a_proxy(tmp_path: Path) -> None:
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    import os
+    os.environ["TRUST_PROXY_HEADERS"] = "true"
+    try:
+        app = create_app()
+        app.dependency_overrides[get_chat_service] = lambda: service(tmp_path, FakeModel(GOOD))
+        with TestClient(app) as client:
+            ask = lambda ip: client.post("/api/chat", json={"question": "What is the exit load?"}, headers={"x-forwarded-for": ip}).status_code
+            assert [ask("1.1.1.1") for _ in range(20)] == [200] * 20
+            assert ask("1.1.1.1") == 429 and ask("2.2.2.2") == 200
+    finally:
+        os.environ.pop("TRUST_PROXY_HEADERS")
+        get_settings.cache_clear()
