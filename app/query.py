@@ -54,6 +54,14 @@ UNSUPPORTED_SCHEME_WORDS = (
 # Unsupported names that contain a supported alias; checked on the full question.
 UNSUPPORTED_CONTAINING_ALIAS = ("us bluechip",)
 MAX_QUERY_CHARS = 500
+# Stable, descriptive facts used for "tell me about <scheme>" questions (no fees or numbers needed).
+OVERVIEW_FACTS = ["investment_objective", "benchmark", "riskometer"]
+_OVERVIEW = re.compile(
+    r"\btell me (?:something |anything |more )?about\b|\boverview\b|\bsummar(?:y|ise|ize)\b|\bdescribe\b"
+    r"|\bdetails (?:of|about|on)\b|\binfo(?:rmation)? (?:on|about)\b|\bknow about\b|\bbasics? of\b"
+    r"|^\s*what is (?:the )?icici\b[^?]*\bfund\s*\??\s*$",
+    re.IGNORECASE,
+)
 # "What is an expense ratio?" / "What does exit load mean?" ask for a general definition, answered
 # from investor-education sources. "What is the exit load?" is scheme-specific and is clarified.
 _DEFINITION = re.compile(
@@ -79,6 +87,8 @@ class QueryAnalysis:
     # Scheme-independent question (definition or statement process), answered from general documents.
     general: bool = False
     definition: bool = False
+    # "Tell me about <scheme>": answered with a short factual snapshot of OVERVIEW_FACTS.
+    overview: bool = False
 
     @property
     def scheme_ids(self) -> list[str]:
@@ -179,4 +189,6 @@ def analyse_query(query: object, registry: SourceRegistry) -> QueryAnalysis:
         if re.search(r"\bfund\s+[a-z0-9]\b", normalised) and not re.search(r"\bicici\b", normalised):
             return QueryAnalysis(query, "out_of_scope", [], facts, reason="That fund is not one of the five supported schemes.")
         return QueryAnalysis(query, "clarify_scheme", [], facts, reason="Which scheme do you mean?")
+    if not facts and _OVERVIEW.search(query):
+        return QueryAnalysis(query, "retrieve", schemes, list(OVERVIEW_FACTS), overview=True)
     return QueryAnalysis(query, "retrieve", schemes, facts)

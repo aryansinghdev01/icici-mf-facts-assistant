@@ -50,7 +50,8 @@ class FakeReranker:
     def score(self, query: str, passages: list[str]) -> list[float]:
         if self.fail:
             raise RuntimeError("reranker down")
-        return [0.95 if ("exit load" in p.lower() or "expense ratio" in p.lower()) else 0.05 for p in passages]
+        relevant = ("exit load", "expense ratio", "objective", "benchmark", "riskometer")
+        return [0.95 if any(term in p.lower() for term in relevant) else 0.05 for p in passages]
 
 
 class FakeEmbedder:
@@ -146,7 +147,7 @@ def test_reranker_outage_is_unverified() -> None:
 
 
 def test_unrecognised_fact_is_unverified_even_if_relevant() -> None:
-    result = retriever([chunk("icici_flexicap_kim", "Exit load: 1% within 12 months.", day=OLD)]).retrieve("Tell me something about ICICI Flexicap")
+    result = retriever([chunk("icici_flexicap_kim", "Exit load: 1% within 12 months.", day=OLD)]).retrieve("Is the ICICI Flexicap logo blue?")
     assert (result.status, result.reason) == ("unverified", "fact_not_recognised")
 
 
@@ -268,3 +269,22 @@ def test_statement_questions_fall_back_to_the_official_service_page() -> None:
 def test_definition_questions_are_distinguished_from_unnamed_scheme_questions(query: str, route: str, definition: bool) -> None:
     analysis = analyse_query(query, load_registry())
     assert (analysis.route, analysis.definition) == (route, definition)
+
+
+def test_overview_gates_each_fact_and_rejects_references_instead_of_statements() -> None:
+    chunks = [
+        chunk("icici_flexicap_factsheet", "Benchmark: Nifty 500 TRI. Riskometer: the risk of the scheme is very high. "
+              "For Investment Objective: refer page no. 160 to 163.", day=NEW, tags=("benchmark", "riskometer", "investment_objective")),
+        chunk("icici_flexicap_kim", "Investment objective: the scheme seeks to generate long-term capital appreciation by investing in equity.",
+              day=OLD, tags=("investment_objective",)),
+    ]
+    result = retriever(chunks).retrieve("Tell me about ICICI Flexicap")
+
+    assert result.status == "verified" and result.analysis.overview
+    sources = {e.primary.chunk.source_id for e in result.evidence}
+    assert sources == {"icici_flexicap_factsheet", "icici_flexicap_kim"}, "objective must come from the document that states it"
+
+
+def test_scheme_without_a_recognised_fact_is_not_verified() -> None:
+    result = retriever([chunk("icici_flexicap_kim", "Exit load: 1% within 12 months.", day=OLD)]).retrieve("What colour is the ICICI Flexicap logo?")
+    assert (result.status, result.reason) == ("unverified", "fact_not_recognised")

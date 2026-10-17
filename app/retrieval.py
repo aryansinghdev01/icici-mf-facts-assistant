@@ -9,7 +9,7 @@ relevant chunk for the exact requested fact exists for every named scheme; other
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, Protocol
 
 import numpy as np
@@ -17,7 +17,7 @@ import numpy as np
 from app.chunker import FACT_TAG_PATTERNS, Chunk, numbers_in
 from app.config import Settings, get_settings
 from app.index import BgeEmbedder, CorpusIndex, Embedder, keyword_tokens, load_index, passage_text
-from app.query import QueryAnalysis, analyse_query
+from app.query import QueryAnalysis, SchemeMatch, analyse_query
 from app.registry import SourceRegistry, load_registry
 
 CANDIDATES_PER_RETRIEVER = 30
@@ -43,6 +43,13 @@ REQUIRED_VALUE_KINDS: dict[str, tuple[str, ...]] = {
     "sip": ("amount",),
     "nav": ("amount", "number"),
     "lock_in": ("duration", "nil"),
+}
+# Descriptive facts must actually be stated, not just referred to ("For Investment Objective: refer page 160").
+REQUIRED_STATEMENT_PATTERNS: dict[str, re.Pattern[str]] = {
+    "investment_objective": re.compile(
+        r"\bseeks? to\b|\baims? to\b|\bobjective of the (?:scheme|fund) is\b|\bto generate\b|\bto provide\b|\bto achieve\b",
+        re.IGNORECASE,
+    ),
 }
 FACT_LABELS = {
     "expense_ratio": "total expense ratio", "exit_load": "exit load", "minimum_investment": "minimum investment amount",
@@ -121,8 +128,12 @@ def _fact_window(text: str, facts: list[str], *, lead: int = 0) -> str:
 
 
 def states_required_values(text: str, facts: list[str]) -> bool:
-    """Every requested numeric fact has a value of an expected kind near its wording."""
+    """Every requested numeric fact has a value of an expected kind near its wording, and every
+    descriptive fact with a statement pattern is actually stated rather than referred to."""
     for fact in facts:
+        statement = REQUIRED_STATEMENT_PATTERNS.get(fact)
+        if statement and not statement.search(_fact_window(text, [fact], lead=RERANK_LEAD_CHARS)):
+            return False
         kinds = REQUIRED_VALUE_KINDS.get(fact)
         if not kinds:
             continue
@@ -327,6 +338,31 @@ class Retriever:
         )
         return Evidence(scheme_id or primary.chunk.scheme_id, primary, corroborating, primary_values)
 
+    def _retrieve_overview(self, analysis: QueryAnalysis, fallback: str | None) -> RetrievalResult:
+        """"Tell me about <scheme>": each overview fact is searched and gated on its own, so the
+        snapshot only contains facts that individually pass the same evidence checks."""
+        evidence: list[Evidence] = []
+        all_candidates: list[Candidate] = []
+        used: tuple[str, ...] = ()
+        for scheme_id in analysis.scheme_ids:
+            name = self.registry.scheme_map[scheme_id].scheme_name
+            for fact in analysis.facts:
+                focused = replace(
+                    analysis, query=f"What is the {FACT_LABELS[fact]} of {name}?", facts=[fact],
+                    schemes=[SchemeMatch(scheme_id, name)], overview=False,
+                )
+                try:
+                    candidates, used = self._candidates(focused, scheme_id)
+                except Exception:  # noqa: BLE001 - without calibrated scores nothing can be verified.
+                    return RetrievalResult("unverified", analysis, reason="retrieval_unavailable", fallback_url=fallback)
+                all_candidates += candidates
+                outcome = self._gate_scheme(scheme_id, candidates, [fact])
+                if not isinstance(outcome, str) and all(e.primary.chunk.chunk_id != outcome.primary.chunk.chunk_id for e in evidence):
+                    evidence.append(outcome)
+        if not evidence:
+            return RetrievalResult("unverified", analysis, candidates=all_candidates, reason="no_sufficiently_relevant_evidence", fallback_url=fallback, retrievers_used=used)
+        return RetrievalResult("verified", analysis, evidence, all_candidates, fallback_url=fallback, retrievers_used=used)
+
     def _fallback_url(self, analysis: QueryAnalysis) -> str | None:
         scheme_ids = analysis.scheme_ids
         if not scheme_ids and "statement" in analysis.facts:
@@ -355,6 +391,8 @@ class Retriever:
         # against the evidence, so relevance alone is never enough to verify an answer.
         if not analysis.facts:
             return RetrievalResult("unverified", analysis, reason="fact_not_recognised", fallback_url=fallback)
+        if analysis.overview:
+            return self._retrieve_overview(analysis, fallback)
         evidence: list[Evidence] = []
         all_candidates: list[Candidate] = []
         used: tuple[str, ...] = ()

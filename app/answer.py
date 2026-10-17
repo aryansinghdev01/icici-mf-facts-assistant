@@ -79,6 +79,10 @@ TEMPLATES = {
     ),
     "unavailable": "The answer service is temporarily unavailable, so I can't verify an answer right now. Please try again shortly.",
     "document": "You can download the official {document} for {scheme} from the link below.",
+    "clarify_fact": (
+        "What would you like to know about {scheme}? I can answer facts such as its expense ratio, exit load, minimum "
+        "investment or SIP, benchmark, riskometer, fund managers, or investment objective."
+    ),
 }
 # "Where can I download the KIM of Flexicap?" asks for a document link, not a fact (P5-03).
 _DOCUMENT_REQUEST = re.compile(r"\b(?:download|link|where|get|find|open|share|send)\b", re.IGNORECASE)
@@ -235,6 +239,10 @@ class ChatService:
         if result.status == "out_of_scope":
             text = f"{result.reason} {TEMPLATES['out_of_scope']}" if result.reason else TEMPLATES["out_of_scope"]
             return self._finish(ChatResponse(text, "out_of_scope"), event="out_of_scope", result=result)
+        if result.status == "unverified" and result.reason == "fact_not_recognised" and result.analysis.scheme_ids:
+            # A scheme but no recognisable fact ("tell me something odd about X"): ask what they want to know.
+            names = " and ".join(self.registry.scheme_map[s].scheme_name for s in result.analysis.scheme_ids)
+            return self._finish(ChatResponse(TEMPLATES["clarify_fact"].format(scheme=names), "clarify"), event="clarify_fact", result=result)
         if result.status == "unverified":
             return self._finish(self._unverified(result), event="unverified", result=result)
         return self._generate(question, result)
@@ -291,7 +299,8 @@ class ChatService:
                 if any(c.source_id == chunk.source_id and c.page_number == chunk.page_number and abs(c.chunk_index - chunk.chunk_index) <= 1 for c in chosen):
                     continue  # already covered as a neighbour
                 chosen.append(chunk)
-                if len(chosen) == PASSAGES_PER_SCHEME:
+                # Overview evidence is already one best chunk per fact; other questions get a few near-ties.
+                if result.analysis.overview or len(chosen) == PASSAGES_PER_SCHEME:
                     break
             for chunk in chosen:
                 passages.append(self._passage(f"S{len(passages) + 1}", item, chunk, facts))

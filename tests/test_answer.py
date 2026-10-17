@@ -312,3 +312,11 @@ def test_performance_refusal_text_matches_its_link(tmp_path: Path) -> None:
     specific = svc.answer("What returns did ICICI Flexicap give last year?")
     assert "SEBI" in general.answer and "sebi.gov.in" in general.source.url
     assert "factsheet linked below" in specific.answer and specific.source.document_type == "FACTSHEET"
+
+
+def test_scheme_question_without_a_fact_gets_a_helpful_prompt(tmp_path: Path) -> None:
+    model = FakeModel(GOOD)
+    response = service(tmp_path, model).answer("What colour is the ICICI Flexicap logo?")
+    assert response.response_type == "clarify"
+    assert "What would you like to know about ICICI Prudential Flexicap Fund?" in response.answer
+    assert model.calls == 0

@@ -41,6 +41,7 @@ CASES: tuple[Case, ...] = (
     Case("R09", "Who is the fund manager of Smallcap fund?", "verified", ("icici_smallcap",), "icici_smallcap_factsheet", 1),
     Case("R10", "Compare Large Cap and Flexicap exit loads.", "verified", ("icici_large_cap", "icici_flexicap"), note="Each scheme verified separately"),
     Case("R11", "What is the benchmark of ICICI Prudential Smallcap Fund?", "verified", ("icici_smallcap",)),
+    Case("R13", "tell me about the Large Cap fund", "verified", ("icici_large_cap",), note="Overview: objective, benchmark, riskometer gated separately"),
     Case("R12", "What is the expense ratio of the Bluechip fund?", "verified", ("icici_large_cap",), "icici_large_cap_factsheet", 1, ("1.13%",), "Former scheme name"),
     # Negative paths: must never produce verified evidence.
     Case("N01", "What is the exit load?", "clarify", note="RET-01 no scheme"),

@@ -12,7 +12,7 @@ A small retrieval-augmented FAQ assistant that answers **factual** questions abo
 
 **Corpus (17 official documents):** the KIM, SID, and monthly factsheet for each scheme (15), plus ICICI Prudential's Statement of Additional Information (statement and service rules) and SEBI's *FAQs for Mutual Fund Investors* (definitions; also the educational link in refusals). Groww pages were reference-only and are blocked from retrieval and citations. The full list is in [docs/deliverables/sources.md](docs/deliverables/sources.md).
 
-**Answers:** expense ratio, exit load, minimum investment and SIP, benchmark, riskometer, fund managers, NAV, plans and options, investment objective, scheme document links, definitions of common terms, and where to get account or capital-gains statements.
+**Answers:** scheme overviews ("Tell me about the Large Cap fund": objective, benchmark, riskometer), expense ratio, exit load, minimum investment and SIP, benchmark, riskometer, fund managers, NAV, plans and options, investment objective, scheme document links, definitions of common terms, and where to get account or capital-gains statements.
 
 ## Deliverables
 
@@ -50,7 +50,7 @@ uvicorn app.main:app
 **Checks:**
 
 ```bash
-pytest                         # 115 automated tests, no network or model calls
+pytest                         # 118 automated tests, no network or model calls
 python -m app.eval_retrieval   # retrieval metrics -> data/processed/retrieval_eval.md
 python -m app.eval_e2e         # live end-to-end run -> e2e_eval.md + regenerates docs/deliverables/
 ```
@@ -77,8 +77,8 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 
 | Check | Result |
 | --- | --- |
-| Automated tests | 115 passed |
-| Retrieval evaluation (24 cases) | Scheme resolution 100%, top-10 evidence recall 100%, cross-scheme evidence 0%, low-confidence leakage 0% |
+| Automated tests | 118 passed |
+| Retrieval evaluation (25 cases) | Scheme resolution 100%, top-10 evidence recall 100%, cross-scheme evidence 0%, low-confidence leakage 0% |
 | End-to-end evaluation (19 cases, eval plan P5-01–P5-09) | 19/19 passed: facts for all five schemes, document links, clarification, scope, and all refusal types |
 | Manual verification | Every value in the sample Q&A was checked against the cited official page |
 
