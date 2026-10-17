@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, field
+import time
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
@@ -204,6 +205,8 @@ class ChatService:
         self.registry = self.retriever.registry
         self.sources = {source.source_id: source for source in self.registry.sources}
         self.audit_log = audit_log or self.settings.resolved_path(self.settings.logs_dir) / "chat_events.jsonl"
+        # Verified factual answers only, keyed by the normalised question; memory-only and short-lived.
+        self._cache: dict[str, tuple[float, ChatResponse]] = {}
 
     # -- public entry point ------------------------------------------------------------------
     def answer(self, question: object) -> ChatResponse:
@@ -266,6 +269,16 @@ class ChatService:
 
     # -- generation ---------------------------------------------------------------------------
     def _generate(self, question: str, result: RetrievalResult) -> ChatResponse:
+        key = " ".join(re.findall(r"[a-z0-9&%.]+", question.casefold()))
+        cached = self._cache.get(key)
+        if cached and time.monotonic() - cached[0] < self.settings.answer_cache_seconds:
+            return self._finish(replace(cached[1]), event="fact_cached", result=result)
+        response = self._generate_uncached(question, result)
+        if response.response_type == "fact" and self.settings.answer_cache_seconds:
+            self._cache[key] = (time.monotonic(), response)
+        return response
+
+    def _generate_uncached(self, question: str, result: RetrievalResult) -> ChatResponse:
         passages = self._passages(result)
         user_prompt = self._user_prompt(question, result, passages)
         feedback: list[str] = []

@@ -72,15 +72,20 @@ class GeminiModel:
         try:
             # The primary model gets retries with backoff; fallbacks get one attempt each.
             attempts = [(self.models[0], 0.0), *((self.models[0], d) for d in RETRY_DELAYS_SECONDS), *((m, 0.0) for m in self.models[1:])]
+            exhausted: set[str] = set()
             for model, delay in attempts:
+                if model in exhausted:
+                    continue
                 if delay:
                     self._sleep(delay)
                 status, body = self._post(client, model, payload)
                 if status == 200:
                     return parse_gemini_response(body)
                 last_error = "rate_limited" if status == 429 else f"http_{status}"
-                if status not in RETRYABLE_STATUS and status != 0:
-                    break  # e.g. 400/403/404: retrying cannot help
+                if status == 429:
+                    exhausted.add(model)  # quota used up: retrying this model cannot help, move on
+                elif status not in RETRYABLE_STATUS and status != 0:
+                    break  # e.g. 400/403: retrying cannot help
         finally:
             if self._client is None:
                 client.close()

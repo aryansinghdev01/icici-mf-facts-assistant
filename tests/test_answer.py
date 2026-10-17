@@ -320,3 +320,27 @@ def test_scheme_question_without_a_fact_gets_a_helpful_prompt(tmp_path: Path) ->
     assert response.response_type == "clarify"
     assert "What would you like to know about ICICI Prudential Flexicap Fund?" in response.answer
     assert model.calls == 0
+
+
+def test_quota_exhausted_model_is_skipped_without_retries() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = request.url.path.split("/")[-1].split(":")[0]
+        calls.append(model)
+        if model == "primary":
+            return httpx.Response(429, json={"error": {"status": "RESOURCE_EXHAUSTED"}})
+        return httpx.Response(200, json=gemini_body({"answer": "A", "used_sources": ["S1"], "supported": True}))
+
+    settings = Settings(gemini_api_key="k", gemini_model="primary", gemini_fallback_models="backup")
+    GeminiModel(settings, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda _: None).draft("s", "u")
+    assert calls == ["primary", "backup"]
+
+
+def test_repeated_factual_question_reuses_the_verified_answer(tmp_path: Path) -> None:
+    model = FakeModel(GOOD)
+    svc = service(tmp_path, model)
+    first = svc.answer("What is the exit load of ICICI Flexicap?")
+    second = svc.answer("what is the exit load of ICICI flexicap?")
+    assert first.answer == second.answer and second.response_type == "fact"
+    assert model.calls == 1

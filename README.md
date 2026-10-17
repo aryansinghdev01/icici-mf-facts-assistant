@@ -50,7 +50,7 @@ uvicorn app.main:app
 **Checks:**
 
 ```bash
-pytest                         # 118 automated tests, no network or model calls
+pytest                         # 120 automated tests, no network or model calls
 python -m app.eval_retrieval   # retrieval metrics -> data/processed/retrieval_eval.md
 python -m app.eval_e2e         # live end-to-end run -> e2e_eval.md + regenerates docs/deliverables/
 ```
@@ -77,13 +77,14 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 
 | Check | Result |
 | --- | --- |
-| Automated tests | 118 passed |
+| Automated tests | 120 passed |
 | Retrieval evaluation (25 cases) | Scheme resolution 100%, top-10 evidence recall 100%, cross-scheme evidence 0%, low-confidence leakage 0% |
 | End-to-end evaluation (19 cases, eval plan P5-01–P5-09) | 19/19 passed: facts for all five schemes, document links, clarification, scope, and all refusal types |
 | Manual verification | Every value in the sample Q&A was checked against the cited official page |
 
 ## Known limitations
 
+- **Gemini free-tier quota:** about **20 requests per day per model**. The app fails over across five Flash/Flash-Lite models (skipping any whose quota is used up), and caches verified answers for an hour so repeated questions cost nothing, giving roughly 100 fresh answers a day. Each live `python -m app.eval_e2e` run uses about 20 of them.
 - **Gemini free tier:** responses take about 5–25 seconds. During heavy load, Google returns "overloaded" (HTTP 503). The app retries and tries fallback models, then shows "temporarily unavailable" and never an unverified answer. On one test day about half of the calls failed this way; on the next, none did.
 - **Factsheets are image-like PDFs** (outlined text with no fonts), so they are read with OCR. Each page is read twice at different resolutions, and a number is used only if both readings agree; OCR wording can still contain minor noise.
 - **Capital-gains statement steps** live on ICICI Prudential's JavaScript-only Investor Services page, which cannot be ingested. Those questions are answered with the official link, not step-by-step instructions.

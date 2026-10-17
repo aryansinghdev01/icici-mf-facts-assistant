@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.8-flash"
     # Tried in order when the primary model is overloaded (HTTP 503) or rate-limited.
-    gemini_fallback_models: str = "gemini-3.7-flash,gemini-3.5-flash"
+    # Free tier quotas are per model (e.g. 20 requests/day), so several models extend daily capacity.
+    gemini_fallback_models: str = "gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    # Identical questions within this window reuse the verified answer instead of a new model call.
+    answer_cache_seconds: int = Field(default=3600, ge=0)
     llm_timeout_seconds: float = Field(default=45.0, gt=0)
     chat_rate_limit_per_minute: int = Field(default=20, ge=1)
     bge_model: str = "BAAI/bge-small-en-v1.5"
