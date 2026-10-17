@@ -4,6 +4,8 @@ A small retrieval-augmented FAQ assistant that answers **factual** questions abo
 
 > **Facts-only. No investment advice.**
 
+**Live app:** <https://icici-mf-facts-assistant-b7ypyfssriac4pcnf8nybb.streamlit.app/> · **Full project explanation (tech, terms, build story):** [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)
+
 ## Scope
 
 **AMC:** ICICI Prudential Mutual Fund
@@ -18,12 +20,13 @@ A small retrieval-augmented FAQ assistant that answers **factual** questions abo
 
 | Deliverable | Location |
 | --- | --- |
-| Working prototype | Live on Streamlit Community Cloud (see *Live demo*), or run locally at <http://127.0.0.1:8000> |
+| Working prototype | **Live:** <https://icici-mf-facts-assistant-b7ypyfssriac4pcnf8nybb.streamlit.app/> (Streamlit Community Cloud), or run locally at <http://127.0.0.1:8000> |
 | Source list (17 URLs) | [docs/deliverables/sources.md](docs/deliverables/sources.md) · [sources.csv](docs/deliverables/sources.csv) |
 | Sample Q&A (10 real answers with links) | [docs/deliverables/sample_qa.md](docs/deliverables/sample_qa.md) |
 | UI disclaimer snippet | [docs/deliverables/disclaimer.md](docs/deliverables/disclaimer.md) |
 | Evaluation reports | `data/processed/e2e_eval.md`, `retrieval_eval.md`, `ingestion_report.md` (generated) |
-| Design documents | [docs/](docs/): problem statement, architecture, implementation plan, edge cases, evaluation plan |
+| Project guide | [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md): what it does, how it works, tech stack, glossary, build story, challenges |
+| Design documents | [docs/](docs/): problem statement, architecture, implementation plan, edge cases, evaluation plan (original plans) |
 
 ## Setup
 
@@ -74,6 +77,8 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 **API:** `POST /api/chat` accepts only `{"question": "...", "context": {"scheme_ids": [...], "facts": [...]}}` (context optional). `GET /api/sources` lists approved sources. `GET /api/health` reports model, index, and storage status without revealing credentials.
 
 ## Live demo (Streamlit Community Cloud, free)
+
+Live at <https://icici-mf-facts-assistant-b7ypyfssriac4pcnf8nybb.streamlit.app/>.
 
 [streamlit_app.py](streamlit_app.py) is a Streamlit front end over the same `ChatService`, so guardrails, retrieval, validation and citations are identical to the FastAPI app. The pre-built chunks and search index are committed, so the hosted app needs no download or OCR step.
 
