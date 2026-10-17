@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.answer import ChatService, Passage, count_sentences, validate_draft
 from app.config import Settings
-from app.llm import DraftAnswer, GeminiModel, LlmUnavailable, parse_gemini_response
+from app.llm import DraftAnswer, FallbackModel, GeminiModel, LlmUnavailable, SarvamModel, parse_answer_json, parse_gemini_response
 from app.main import create_app, get_chat_service
 from app.policy import classify
 from tests.test_retrieval import NEW, OLD, chunk, retriever
@@ -194,7 +194,7 @@ def gemini_body(payload: dict) -> dict:
 
 
 def test_gemini_parser_skips_thoughts_and_rejects_malformed_output() -> None:
-    assert parse_gemini_response(gemini_body({"answer": "A", "used_sources": ["S1"], "supported": True})) == DraftAnswer("A", ("S1",), True)
+    assert parse_gemini_response(gemini_body({"answer": "A", "used_sources": ["S1"], "supported": True})).answer == "A"
     with pytest.raises(LlmUnavailable):
         parse_gemini_response({"candidates": [{"content": {"parts": [{"text": "not json"}]}}]})
     with pytest.raises(LlmUnavailable):
@@ -344,3 +344,60 @@ def test_repeated_factual_question_reuses_the_verified_answer(tmp_path: Path) ->
     second = svc.answer("what is the exit load of ICICI flexicap?")
     assert first.answer == second.answer and second.response_type == "fact"
     assert model.calls == 1
+
+
+def sarvam_body(content: str) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+
+
+def test_sarvam_reply_in_a_markdown_code_block_is_parsed() -> None:
+    fenced = '\n```json\n{"answer": "The exit load is 1%.", "used_sources": ["S1"], "supported": true}\n```'
+    assert parse_answer_json(fenced).answer == "The exit load is 1%."
+    with pytest.raises(LlmUnavailable):
+        parse_answer_json("Sorry, I cannot help with that.")
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=sarvam_body(fenced))
+
+    settings = Settings(gemini_api_key="", sarvam_api_key="sk_test", sarvam_model="sarvam-105b")
+    draft = SarvamModel(settings, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda _: None).draft("s", "u")
+    assert draft.model == "sarvam:sarvam-105b" and draft.used_sources == ("S1",)
+    assert seen[0].headers["api-subscription-key"] == "sk_test"
+    assert json.loads(seen[0].content)["model"] == "sarvam-105b"
+
+
+def test_sarvam_auth_errors_are_not_retried() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(401, json={"error": "invalid key"})
+
+    model = SarvamModel(Settings(sarvam_api_key="bad"), client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda _: None)
+    with pytest.raises(LlmUnavailable, match="sarvam_http_401"):
+        model.draft("s", "u")
+    assert len(calls) == 1
+
+
+def test_fallback_chain_uses_the_backup_only_when_the_primary_fails() -> None:
+    backup = FakeModel(DraftAnswer("A", ("S1",), True, "sarvam:sarvam-105b"))
+    assert FallbackModel([FakeModel(LlmUnavailable("rate_limited")), backup]).draft("s", "u").model == "sarvam:sarvam-105b"
+    assert backup.calls == 1
+    primary_ok = FakeModel(DraftAnswer("B", ("S1",), True, "gemini-3.8-flash"))
+    unused = FakeModel(GOOD)
+    assert FallbackModel([primary_ok, unused]).draft("s", "u").model == "gemini-3.8-flash" and unused.calls == 0
+    with pytest.raises(LlmUnavailable, match="all_providers_failed"):
+        FallbackModel([FakeModel(LlmUnavailable("http_503")), FakeModel(LlmUnavailable("sarvam_http_503"))]).draft("s", "u")
+
+
+def test_sarvam_truncated_reply_is_never_parsed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["response_format"] == {"type": "json_object"}
+        return httpx.Response(200, json={"choices": [{"finish_reason": "length", "message": {"content": '{"answer": "The exit lo'}}]})
+
+    model = SarvamModel(Settings(sarvam_api_key="k"), client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda _: None)
+    with pytest.raises(LlmUnavailable, match="truncated"):
+        model.draft("s", "u")

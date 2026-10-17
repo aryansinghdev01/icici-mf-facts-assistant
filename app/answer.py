@@ -21,7 +21,7 @@ from typing import Literal
 
 from app.chunker import Chunk
 from app.config import Settings, get_settings
-from app.llm import AnswerModel, DraftAnswer, GeminiModel, LlmUnavailable
+from app.llm import AnswerModel, DraftAnswer, LlmUnavailable, build_answer_model
 from app.policy import classify
 from app.query import MAX_QUERY_CHARS
 from app.registry import SourceRecord
@@ -201,7 +201,7 @@ class ChatService:
     ) -> None:
         self.settings = settings or get_settings()
         self.retriever = retriever or Retriever(settings=self.settings)
-        self.model = model or GeminiModel(self.settings)
+        self.model = model or build_answer_model(self.settings)
         self.registry = self.retriever.registry
         self.sources = {source.source_id: source for source in self.registry.sources}
         self.audit_log = audit_log or self.settings.resolved_path(self.settings.logs_dir) / "chat_events.jsonl"
@@ -291,7 +291,8 @@ class ChatService:
                 return self._finish(response, event="llm_unavailable", detail=str(error), result=result)
             feedback = validate_draft(draft, passages)
             if not feedback:
-                return self._finish(self._fact_response(draft, passages), event="fact", result=result, detail=f"attempts={attempt + 1}")
+                detail = f"attempts={attempt + 1} model={draft.model or self.model.model_name}"
+                return self._finish(self._fact_response(draft, passages), event="fact", result=result, detail=detail)
         return self._finish(self._unverified(result), event="validation_failed", detail=";".join(feedback), result=result)
 
     def _passages(self, result: RetrievalResult) -> list[Passage]:

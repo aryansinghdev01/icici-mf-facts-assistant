@@ -27,14 +27,14 @@ A small retrieval-augmented FAQ assistant that answers **factual** questions abo
 
 ## Setup
 
-**Prerequisites:** Python 3.11+, [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (`brew install tesseract` on macOS), and a free Gemini API key from [Google AI Studio](https://aistudio.google.com).
+**Prerequisites:** Python 3.11+, [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (`brew install tesseract` on macOS), and a free Gemini API key from [Google AI Studio](https://aistudio.google.com). Optionally, a [Sarvam AI](https://docs.sarvam.ai) key as a backup model.
 
 ```bash
 # 1. Virtual environment (keep it outside iCloud/Dropbox-synced folders; see Platform notes)
 python3 -m venv ~/.venvs/rag-chatbot && source ~/.venvs/rag-chatbot/bin/activate
 pip install -e '.[dev]'
 
-# 2. Configuration: put your key in GEMINI_API_KEY. Never commit .env.
+# 2. Configuration: put your key in GEMINI_API_KEY (and optionally SARVAM_API_KEY). Never commit .env.
 cp .env.example .env
 
 # 3. Build the corpus: download, extract (with OCR), quality-check, chunk (~2 min)
@@ -50,7 +50,7 @@ uvicorn app.main:app
 **Checks:**
 
 ```bash
-pytest                         # 120 automated tests, no network or model calls
+pytest                         # 124 automated tests, no network or model calls
 python -m app.eval_retrieval   # retrieval metrics -> data/processed/retrieval_eval.md
 python -m app.eval_e2e         # live end-to-end run -> e2e_eval.md + regenerates docs/deliverables/
 ```
@@ -68,7 +68,7 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 2. **Query understanding** ([app/query.py](app/query.py)) resolves the scheme, including former names, spacing variants, and typos, and the fact being asked. Questions with no scheme ("What is the exit load?") get a clarification. Other fund houses and unsupported ICICI schemes are declined.
 3. **Hybrid retrieval** ([app/retrieval.py](app/retrieval.py)) runs BM25 and `bge-small-en-v1.5` vectors (FAISS) over only that scheme's chunks, then reranks with `bge-reranker-base`. The gate requires relevant evidence that actually states a value of the right kind (e.g. a percentage for an expense ratio).
 4. **Source authority:** when documents disagree, the **newest dated document wins**. For example, the Flexicap KIM (Oct 2025) says the exit load applies within 12 months; the July 2026 factsheet says one month (w.e.f. April 6, 2026), and the factsheet is cited. Same-date conflicts return "couldn't verify".
-5. **Generation and validation** ([app/answer.py](app/answer.py)). Gemini sees only the question and up to three evidence passages per scheme and returns structured JSON. Answers must be at most three sentences, contain no links, advice, or performance language, and **every number must appear in the cited evidence**. One retry, otherwise "couldn't verify" with the official link.
+5. **Generation and validation** ([app/answer.py](app/answer.py), [app/llm.py](app/llm.py)). Gemini (with Sarvam AI as a backup) sees only the question and up to three evidence passages per scheme and returns structured JSON. Answers must be at most three sentences, contain no links, advice, or performance language, and **every number must appear in the cited evidence**. One retry, otherwise "couldn't verify" with the official link.
 6. **Citations come from the registry**, never from the model. Each has the title, official URL, page, and document date shown as *Last updated from sources*.
 
 **API:** `POST /api/chat` accepts only `{"question": "..."}`. `GET /api/sources` lists approved sources. `GET /api/health` reports model, index, and storage status without revealing credentials.
@@ -77,14 +77,14 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 
 | Check | Result |
 | --- | --- |
-| Automated tests | 120 passed |
+| Automated tests | 124 passed |
 | Retrieval evaluation (25 cases) | Scheme resolution 100%, top-10 evidence recall 100%, cross-scheme evidence 0%, low-confidence leakage 0% |
 | End-to-end evaluation (19 cases, eval plan P5-01–P5-09) | 19/19 passed: facts for all five schemes, document links, clarification, scope, and all refusal types |
 | Manual verification | Every value in the sample Q&A was checked against the cited official page |
 
 ## Known limitations
 
-- **Gemini free-tier quota:** about **20 requests per day per model**. The app fails over across five Flash/Flash-Lite models (skipping any whose quota is used up), and caches verified answers for an hour so repeated questions cost nothing, giving roughly 100 fresh answers a day. Each live `python -m app.eval_e2e` run uses about 20 of them.
+- **Gemini free-tier quota:** about **20 requests per day per model**. The app fails over across five Flash/Flash-Lite models (skipping any whose quota is used up), and caches verified answers for an hour so repeated questions cost nothing, giving roughly 100 fresh answers a day. If every Gemini model is unavailable, **Sarvam AI (`sarvam-105b`)** is used as a backup: same prompt, same answer checks, but slower (about 20–90 seconds) because it reasons before answering. Each live `python -m app.eval_e2e` run uses about 20 of them.
 - **Gemini free tier:** responses take about 5–25 seconds. During heavy load, Google returns "overloaded" (HTTP 503). The app retries and tries fallback models, then shows "temporarily unavailable" and never an unverified answer. On one test day about half of the calls failed this way; on the next, none did.
 - **Factsheets are image-like PDFs** (outlined text with no fonts), so they are read with OCR. Each page is read twice at different resolutions, and a number is used only if both readings agree; OCR wording can still contain minor noise.
 - **Capital-gains statement steps** live on ICICI Prudential's JavaScript-only Investor Services page, which cannot be ingested. Those questions are answered with the official link, not step-by-step instructions.

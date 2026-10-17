@@ -107,7 +107,10 @@ def create_app() -> FastAPI:
             status="healthy" if paths_ready and index.semantic_available else "degraded",
             environment=settings.app_env,
             configuration={
-                "llm": {"provider": "Gemini", "model": settings.gemini_model, "configured": settings.llm_configured},
+                "llm": {
+                    "provider": "Gemini", "model": settings.gemini_model, "configured": settings.gemini_configured,
+                    "backup": {"provider": "Sarvam AI", "model": settings.sarvam_model, "configured": settings.sarvam_configured},
+                },
                 "embeddings": {"provider": "BGE", "model": settings.bge_model},
                 "reranker": {"model": settings.reranker_model, "min_score": settings.rerank_min_score},
                 "index": {"semantic_search": index.semantic_available, "reason": index.reason, "chunks": index.chunk_count},

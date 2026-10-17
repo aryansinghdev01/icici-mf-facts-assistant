@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     gemini_fallback_models: str = "gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
     # Identical questions within this window reuse the verified answer instead of a new model call.
     answer_cache_seconds: int = Field(default=3600, ge=0)
+    # Backup provider used only when every Gemini model is unavailable (OpenAI-style chat API).
+    sarvam_api_key: SecretStr | None = None
+    sarvam_model: str = "sarvam-105b"
+    # sarvam-105b reasons before answering; low effort keeps labels accurate, and needs a large budget.
+    sarvam_reasoning_effort: str = "low"
+    sarvam_max_tokens: int = Field(default=8192, ge=512)
+    sarvam_timeout_seconds: float = Field(default=90.0, gt=0)
     llm_timeout_seconds: float = Field(default=45.0, gt=0)
     chat_rate_limit_per_minute: int = Field(default=20, ge=1)
     bge_model: str = "BAAI/bge-small-en-v1.5"
@@ -71,8 +78,16 @@ class Settings(BaseSettings):
         }
 
     @property
-    def llm_configured(self) -> bool:
+    def gemini_configured(self) -> bool:
         return self.gemini_api_key is not None and bool(self.gemini_api_key.get_secret_value().strip())
+
+    @property
+    def sarvam_configured(self) -> bool:
+        return self.sarvam_api_key is not None and bool(self.sarvam_api_key.get_secret_value().strip())
+
+    @property
+    def llm_configured(self) -> bool:
+        return self.gemini_configured or self.sarvam_configured
 
     def ensure_storage_directories(self) -> None:
         for directory in self.storage_paths.values():
