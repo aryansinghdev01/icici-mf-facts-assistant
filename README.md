@@ -18,7 +18,7 @@ A small retrieval-augmented FAQ assistant that answers **factual** questions abo
 
 | Deliverable | Location |
 | --- | --- |
-| Working prototype | Run locally (see below), open <http://127.0.0.1:8000> |
+| Working prototype | Live on Streamlit Community Cloud (see *Live demo*), or run locally at <http://127.0.0.1:8000> |
 | Source list (17 URLs) | [docs/deliverables/sources.md](docs/deliverables/sources.md) · [sources.csv](docs/deliverables/sources.csv) |
 | Sample Q&A (10 real answers with links) | [docs/deliverables/sample_qa.md](docs/deliverables/sample_qa.md) |
 | UI disclaimer snippet | [docs/deliverables/disclaimer.md](docs/deliverables/disclaimer.md) |
@@ -72,6 +72,21 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 6. **Citations come from the registry**, never from the model. Each has the title, official URL, page, and document date shown as *Last updated from sources*.
 
 **API:** `POST /api/chat` accepts only `{"question": "...", "context": {"scheme_ids": [...], "facts": [...]}}` (context optional). `GET /api/sources` lists approved sources. `GET /api/health` reports model, index, and storage status without revealing credentials.
+
+## Live demo (Streamlit Community Cloud, free)
+
+[streamlit_app.py](streamlit_app.py) is a Streamlit front end over the same `ChatService`, so guardrails, retrieval, validation and citations are identical to the FastAPI app. The pre-built chunks and search index are committed, so the hosted app needs no download or OCR step.
+
+1. Sign in at <https://share.streamlit.io> with GitHub and choose **Create app → Deploy a public app from GitHub**.
+2. Repository `aryansinghdev01/icici-mf-facts-assistant`, branch `main`, main file `streamlit_app.py`.
+3. **Advanced settings**: Python 3.11, and under **Secrets** paste:
+   ```toml
+   GEMINI_API_KEY = "your-gemini-key"
+   SARVAM_API_KEY = "your-sarvam-key"
+   ```
+4. Deploy. The first start downloads the BGE models (about 1.2 GB) and takes a few minutes. Apps that go unvisited for a while sleep, and the next visitor wakes them (about a minute).
+
+Locally: `streamlit run streamlit_app.py`. A Hugging Face Spaces Docker setup is also in [deploy/huggingface/](deploy/huggingface/), but Docker Spaces now require a paid plan.
 
 ## Results
 

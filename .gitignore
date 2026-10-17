@@ -10,8 +10,12 @@ data/extracted_text/*
 !data/extracted_text/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# Pre-built search data is committed so the hosted app needs no download/OCR step.
+!data/processed/chunks.jsonl
 data/indexes/*
 !data/indexes/.gitkeep
+!data/indexes/chunks.faiss
+!data/indexes/index_manifest.json
 data/logs/*
 !data/logs/.gitkeep
 .DS_Store
