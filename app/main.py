@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -12,7 +13,7 @@ from threading import Lock
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from app.config import Settings, get_settings
 from app.index import check_index
@@ -37,10 +38,19 @@ class HealthResponse(BaseModel):
     configuration: dict[str, object]
 
 
+class ChatContext(BaseModel):
+    """Scheme and fact names from the previous answer (never free text); checked against the registry."""
+
+    model_config = ConfigDict(extra="forbid")
+    scheme_ids: list[str] = Field(default_factory=list, max_length=3)
+    facts: list[str] = Field(default_factory=list, max_length=4)
+
+
 class ChatRequest(BaseModel):
-    # Only a question is accepted: no identity, account, or upload fields (API-03).
+    # Only a question (plus optional follow-up context) is accepted: no identity, account, or upload fields (API-03).
     model_config = ConfigDict(extra="forbid")
     question: StrictStr
+    context: ChatContext | None = None
 
 
 @lru_cache
@@ -144,7 +154,15 @@ def create_app() -> FastAPI:
                 content={"answer": "Too many questions in a short time. Please wait a minute and try again.", "response_type": "rate_limited",
                          "source": None, "additional_sources": [], "last_updated_from_sources": None, "disclaimer": "Facts-only. No investment advice."},
             )
-        return service.answer(body.question).to_dict()
+        from app.query import ConversationContext
+
+        context = None
+        if body.context:
+            context = ConversationContext(
+                tuple(s for s in body.context.scheme_ids if re.fullmatch(r"icici_[a-z0-9_]{2,40}", s)),
+                tuple(f for f in body.context.facts if re.fullmatch(r"[a-z_]{2,30}", f)),
+            )
+        return service.answer(body.question, context).to_dict()
 
     return app
 

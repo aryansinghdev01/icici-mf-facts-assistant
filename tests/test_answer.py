@@ -10,6 +10,7 @@ from app.config import Settings
 from app.llm import DraftAnswer, FallbackModel, GeminiModel, LlmUnavailable, SarvamModel, parse_answer_json, parse_gemini_response
 from app.main import create_app, get_chat_service
 from app.policy import classify
+from app.query import ConversationContext
 from tests.test_retrieval import NEW, OLD, chunk, retriever
 
 FLEXI_EXIT = "Exit load: 1% of applicable NAV if redeemed within one month from allotment; Nil after one month (w.e.f. April 6, 2026)."
@@ -165,7 +166,8 @@ def passage(text: str, unconfirmed: tuple[str, ...] = ()) -> Passage:
         ("One. Two. Three. Four.", "more_than_3_sentences"),
         ("The exit load is 1%; see www.icicipruamc.com.", "contains_link_text"),
         ("The exit load is 1%, so it is a good investment.", "advice_language"),
-        ("The exit load is 1% and returns were strong.", "performance_language"),
+        ("The exit load is 1% and returns were 12% last year.", "performance_language"),
+        ("The fund outperformed its benchmark.", "performance_language"),
         ("The exit load is 3% within one month.", "numbers_not_in_cited_evidence"),
     ],
 )
@@ -401,3 +403,45 @@ def test_sarvam_truncated_reply_is_never_parsed() -> None:
     model = SarvamModel(Settings(sarvam_api_key="k"), client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda _: None)
     with pytest.raises(LlmUnavailable, match="truncated"):
         model.draft("s", "u")
+
+
+SILVER_RISK = "Riskometer: the risk of the scheme is very high. Benchmark: Domestic price of silver."
+
+
+def test_follow_up_questions_keep_the_scheme_and_the_pending_fact(tmp_path: Path) -> None:
+    chunks = [chunk("icici_silver_etf_fof_factsheet", SILVER_RISK, day=NEW, tags=("riskometer", "benchmark"))]
+    draft = DraftAnswer("The risk of the scheme is very high.", ("S1",), True)
+    svc = service(tmp_path, FakeModel(draft), chunks)
+
+    first = svc.answer("riskometer")
+    assert first.response_type == "clarify" and first.context == {"scheme_ids": [], "facts": ["riskometer"]}
+    second = svc.answer("Silver ETF FoF", ConversationContext(tuple(first.context["scheme_ids"]), tuple(first.context["facts"])))
+    assert second.response_type == "fact" and second.source.source_id == "icici_silver_etf_fof_factsheet"
+    third = svc.answer("riskometer", ConversationContext(("icici_silver_etf_fof",), ("benchmark",)))
+    assert third.response_type == "fact"
+
+
+def test_context_never_overrides_a_named_scheme_or_scope_checks(tmp_path: Path) -> None:
+    svc = service(tmp_path, FakeModel(GOOD))
+    silver = ConversationContext(("icici_silver_etf_fof",), ("riskometer",))
+    assert svc.answer("HDFC Flexi Cap exit load", silver).response_type == "out_of_scope"
+    assert svc.answer("What is the exit load of ICICI Flexicap?", silver).source.source_id == "icici_flexicap_factsheet"
+    assert svc.answer("Should I buy it?", silver).response_type == "refusal_advice"
+
+
+def test_unknown_context_values_are_ignored(tmp_path: Path) -> None:
+    bogus = ConversationContext(("icici_not_a_scheme",), ("not_a_fact",))
+    assert service(tmp_path, FakeModel(GOOD)).answer("riskometer", bogus).response_type == "clarify"
+
+
+def test_chat_endpoint_accepts_context_but_rejects_extra_fields_inside_it(api: TestClient) -> None:
+    ok = api.post("/api/chat", json={"question": "exit load", "context": {"scheme_ids": ["icici_flexicap"], "facts": []}})
+    assert ok.status_code == 200 and ok.json()["response_type"] == "fact"
+    bad = api.post("/api/chat", json={"question": "exit load", "context": {"scheme_ids": [], "facts": [], "pan": "ABCDE1234F"}})
+    assert bad.status_code == 422
+
+
+def test_objective_that_mentions_returns_is_not_a_performance_claim() -> None:
+    text = "Investment objective: the scheme seeks to generate returns by investing in units of ICICI Prudential Silver ETF."
+    draft = DraftAnswer("The scheme seeks to generate returns by investing in units of ICICI Prudential Silver ETF.", ("S1",), True)
+    assert validate_draft(draft, [passage(text)]) == []

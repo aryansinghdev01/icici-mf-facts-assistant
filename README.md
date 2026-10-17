@@ -50,7 +50,7 @@ uvicorn app.main:app
 **Checks:**
 
 ```bash
-pytest                         # 124 automated tests, no network or model calls
+pytest                         # 133 automated tests, no network or model calls
 python -m app.eval_retrieval   # retrieval metrics -> data/processed/retrieval_eval.md
 python -m app.eval_e2e         # live end-to-end run -> e2e_eval.md + regenerates docs/deliverables/
 ```
@@ -65,19 +65,19 @@ question ─► guardrails ─► scheme + fact detection ─► hybrid search �
 ```
 
 1. **Guardrails run first** ([app/policy.py](app/policy.py)). Personal information (PAN, Aadhaar, account or folio numbers, OTPs, email, phone) is refused before search or the model, and is never logged. Advice ("should I buy", "which is best", including "hypothetically" framing) is refused with SEBI's investor FAQs. Return and performance questions are refused with the scheme's factsheet.
-2. **Query understanding** ([app/query.py](app/query.py)) resolves the scheme, including former names, spacing variants, and typos, and the fact being asked. Questions with no scheme ("What is the exit load?") get a clarification. Other fund houses and unsupported ICICI schemes are declined.
+2. **Query understanding** ([app/query.py](app/query.py)) resolves the scheme, including former names, spacing variants, and typos, and the fact being asked. A bare scheme name gets its overview, and **follow-ups keep context**: each answer returns the scheme and fact names it covered, the page sends them back with the next question, so "riskometer" after a Silver ETF FoF answer, or "and Large Cap?" after an exit-load answer, just work. Only registry scheme IDs and fact names are accepted, nothing is stored server-side, and refreshing the page clears it. Questions with no scheme ("What is the exit load?") get a clarification. Other fund houses and unsupported ICICI schemes are declined.
 3. **Hybrid retrieval** ([app/retrieval.py](app/retrieval.py)) runs BM25 and `bge-small-en-v1.5` vectors (FAISS) over only that scheme's chunks, then reranks with `bge-reranker-base`. The gate requires relevant evidence that actually states a value of the right kind (e.g. a percentage for an expense ratio).
 4. **Source authority:** when documents disagree, the **newest dated document wins**. For example, the Flexicap KIM (Oct 2025) says the exit load applies within 12 months; the July 2026 factsheet says one month (w.e.f. April 6, 2026), and the factsheet is cited. Same-date conflicts return "couldn't verify".
 5. **Generation and validation** ([app/answer.py](app/answer.py), [app/llm.py](app/llm.py)). Gemini (with Sarvam AI as a backup) sees only the question and up to three evidence passages per scheme and returns structured JSON. Answers must be at most three sentences, contain no links, advice, or performance language, and **every number must appear in the cited evidence**. One retry, otherwise "couldn't verify" with the official link.
 6. **Citations come from the registry**, never from the model. Each has the title, official URL, page, and document date shown as *Last updated from sources*.
 
-**API:** `POST /api/chat` accepts only `{"question": "..."}`. `GET /api/sources` lists approved sources. `GET /api/health` reports model, index, and storage status without revealing credentials.
+**API:** `POST /api/chat` accepts only `{"question": "...", "context": {"scheme_ids": [...], "facts": [...]}}` (context optional). `GET /api/sources` lists approved sources. `GET /api/health` reports model, index, and storage status without revealing credentials.
 
 ## Results
 
 | Check | Result |
 | --- | --- |
-| Automated tests | 124 passed |
+| Automated tests | 133 passed |
 | Retrieval evaluation (25 cases) | Scheme resolution 100%, top-10 evidence recall 100%, cross-scheme evidence 0%, low-confidence leakage 0% |
 | End-to-end evaluation (19 cases, eval plan P5-01–P5-09) | 19/19 passed: facts for all five schemes, document links, clarification, scope, and all refusal types |
 | Manual verification | Every value in the sample Q&A was checked against the cited official page |

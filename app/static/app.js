@@ -10,6 +10,9 @@
   const thread = document.getElementById("thread");
   const count = document.getElementById("count");
   let busy = false;
+  // Scheme/fact names from the last answer, so follow-ups like "riskometer" keep the scheme.
+  // Held in memory only: refreshing the page clears it.
+  let lastContext = null;
 
   // response_type -> visual state and label (refusals, unverified, and errors look distinct from facts)
   const STATES = {
@@ -114,11 +117,14 @@
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify(lastContext ? { question: text, context: lastContext } : { question: text }),
       });
       let data = null;
       try { data = await response.json(); } catch (_) { /* handled below */ }
       if (data && typeof data.answer === "string") {
+        if (data.context && Array.isArray(data.context.scheme_ids) && Array.isArray(data.context.facts)) {
+          lastContext = { scheme_ids: data.context.scheme_ids.slice(0, 3), facts: data.context.facts.slice(0, 4) };
+        }
         card = renderResponse(data);
       } else {
         card = renderResponse({ response_type: "invalid", answer: "That question couldn't be processed. Please rephrase it." });

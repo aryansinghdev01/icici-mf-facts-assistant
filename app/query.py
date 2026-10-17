@@ -75,6 +75,16 @@ class SchemeMatch:
     scheme_id: str
     matched_text: str
     fuzzy: bool = False
+    from_context: bool = False  # carried over from the previous turn, not named in this question
+
+
+@dataclass(frozen=True)
+class ConversationContext:
+    """What the previous answer was about (scheme and fact names only), echoed back by the client
+    so that follow-ups like "riskometer" or "and Large Cap?" work. Nothing is stored server-side."""
+
+    scheme_ids: tuple[str, ...] = ()
+    facts: tuple[str, ...] = ()
 
 
 @dataclass
@@ -112,7 +122,8 @@ def _variants(scheme: Scheme) -> set[str]:
             variants.add(value)
             variants.add(value.replace(" and ", " "))  # "large mid cap"
     if scheme.scheme_id == "icici_silver_etf_fof":
-        variants |= {"silver etf fund of fund", "silver etf fund of funds", "silver fof"}
+        # The only silver scheme in scope, so plain "Silver ETF" / "Silver" mean the FoF here.
+        variants |= {"silver etf fund of fund", "silver etf fund of funds", "silver fof", "silver etf", "silver"}
     return variants
 
 
@@ -161,7 +172,13 @@ def detect_facts(query: str) -> list[str]:
     return facts
 
 
-def analyse_query(query: object, registry: SourceRegistry) -> QueryAnalysis:
+# Words that can surround a bare scheme name ("tell me the icici silver etf fof please").
+_FILLER = frozenset(
+    "the a an icici prudential pru fund funds scheme about what whats is are of for on me tell show give please and info details".split()
+)
+
+
+def analyse_query(query: object, registry: SourceRegistry, context: ConversationContext | None = None) -> QueryAnalysis:
     if not isinstance(query, str) or not re.search(r"[A-Za-z]{2,}", query):
         return QueryAnalysis(str(query), "invalid", reason="Please ask a question in words, e.g. the exit load of a named scheme.")
     if len(query) > MAX_QUERY_CHARS:
@@ -188,7 +205,22 @@ def analyse_query(query: object, registry: SourceRegistry) -> QueryAnalysis:
         # "Fund X" or "ICICI fund" names something, but not a supported scheme unambiguously.
         if re.search(r"\bfund\s+[a-z0-9]\b", normalised) and not re.search(r"\bicici\b", normalised):
             return QueryAnalysis(query, "out_of_scope", [], facts, reason="That fund is not one of the five supported schemes.")
-        return QueryAnalysis(query, "clarify_scheme", [], facts, reason="Which scheme do you mean?")
-    if not facts and _OVERVIEW.search(query):
-        return QueryAnalysis(query, "retrieve", schemes, list(OVERVIEW_FACTS), overview=True)
+        known = [s for s in (context.scheme_ids if context else ()) if s in registry.scheme_map]
+        if not known:
+            return QueryAnalysis(query, "clarify_scheme", [], facts, reason="Which scheme do you mean?")
+        # Follow-up such as "riskometer" after a Silver ETF FoF answer: reuse that scheme.
+        schemes = [SchemeMatch(s, registry.scheme_map[s].scheme_name, from_context=True) for s in known]
+    if not facts:
+        if _OVERVIEW.search(query):
+            return QueryAnalysis(query, "retrieve", schemes, list(OVERVIEW_FACTS), overview=True)
+        pending = [f for f in (context.facts if context else ()) if f in QUERY_FACT_PATTERNS]
+        named = {m.scheme_id for m in schemes if not m.from_context}
+        # Carry the earlier fact only when switching scheme ("and Large Cap?") or answering "which scheme?";
+        # naming the same scheme again means "tell me about it".
+        if pending and named and named != set(context.scheme_ids if context else ()):
+            # Scheme named after "which scheme?" (or "and Large Cap?"): answer the earlier fact for it.
+            return QueryAnalysis(query, "retrieve", schemes, pending, overview=pending == OVERVIEW_FACTS)
+        if not all(m.from_context for m in schemes) and set(uncovered.split()) <= _FILLER:
+            # Just a scheme name ("silver etf FOF"): give its overview rather than asking again.
+            return QueryAnalysis(query, "retrieve", schemes, list(OVERVIEW_FACTS), overview=True)
     return QueryAnalysis(query, "retrieve", schemes, facts)

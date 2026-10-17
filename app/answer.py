@@ -23,7 +23,7 @@ from app.chunker import Chunk
 from app.config import Settings, get_settings
 from app.llm import AnswerModel, DraftAnswer, LlmUnavailable, build_answer_model
 from app.policy import classify
-from app.query import MAX_QUERY_CHARS
+from app.query import MAX_QUERY_CHARS, ConversationContext
 from app.registry import SourceRecord
 from app.retrieval import Evidence, RetrievalResult, Retriever
 
@@ -117,7 +117,14 @@ _ADVICE_WORDS = re.compile(
     r"|best|worth (?:it|investing)|suitable for you|you should|safer|better (?:option|choice|fund))\b",
     re.IGNORECASE,
 )
-_PERFORMANCE_WORDS = re.compile(r"\b(?:returns?|cagr|xirr|outperform\w*|performance|gained|grew)\b", re.IGNORECASE)
+# "Returns"/"performance" only count as performance claims next to figures or periods: an objective such as
+# "seeks to generate returns by investing in units of the Silver ETF" is a documented fact, not a claim.
+_PERFORMANCE_WORDS = re.compile(
+    r"\b(?:cagr|xirr|outperform\w*|gained|grew|annuali[sz]ed)\b"
+    r"|\b(?:returns?|performance)\b[^.]{0,60}(?:\d|%|\bpast\b|\blast\b|\byears?\b|\bannual|since inception)"
+    r"|(?:\d|%)[^.]{0,30}\b(?:returns?|performance)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -139,6 +146,8 @@ class ChatResponse:
     additional_sources: list[Citation] = field(default_factory=list)
     last_updated_from_sources: str | None = None
     disclaimer: str = DISCLAIMER
+    # Scheme/fact names this answer was about, for the client to send back with a follow-up question.
+    context: dict[str, list[str]] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -209,7 +218,7 @@ class ChatService:
         self._cache: dict[str, tuple[float, ChatResponse]] = {}
 
     # -- public entry point ------------------------------------------------------------------
-    def answer(self, question: object) -> ChatResponse:
+    def answer(self, question: object, context: ConversationContext | None = None) -> ChatResponse:
         if not isinstance(question, str) or not question.strip():
             return self._finish(ChatResponse("Please type a question about one of the supported schemes.", "invalid"), event="invalid")
         if len(question) > MAX_QUERY_CHARS:
@@ -234,7 +243,7 @@ class ChatService:
         document = self._document_request(question)
         if document is not None:
             return document
-        result = self.retriever.retrieve(question)
+        result = self.retriever.retrieve(question, context)
         if result.status == "invalid":
             return self._finish(ChatResponse(result.reason or "Please rephrase your question.", "invalid"), event="invalid")
         if result.status == "clarify":
@@ -269,7 +278,9 @@ class ChatService:
 
     # -- generation ---------------------------------------------------------------------------
     def _generate(self, question: str, result: RetrievalResult) -> ChatResponse:
-        key = " ".join(re.findall(r"[a-z0-9&%.]+", question.casefold()))
+        # Keyed by what was actually resolved too: "riskometer" means different things in different contexts.
+        resolved = f"{','.join(result.analysis.scheme_ids)}|{','.join(result.analysis.facts)}|"
+        key = resolved + " ".join(re.findall(r"[a-z0-9&%.]+", question.casefold()))
         cached = self._cache.get(key)
         if cached and time.monotonic() - cached[0] < self.settings.answer_cache_seconds:
             return self._finish(replace(cached[1]), event="fact_cached", result=result)
@@ -409,6 +420,8 @@ class ChatService:
     # -- audit ---------------------------------------------------------------------------------
     def _finish(self, response: ChatResponse, *, event: str, detail: str | None = None, result: RetrievalResult | None = None) -> ChatResponse:
         """Log classification metadata only: never the question, answer text, or any PII value."""
+        if result is not None and response.response_type in {"fact", "clarify", "unverified", "unavailable"}:
+            response.context = {"scheme_ids": list(result.analysis.scheme_ids), "facts": list(result.analysis.facts)}
         record = {
             "at": datetime.now(UTC).isoformat(),
             "event": event,

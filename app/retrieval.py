@@ -17,7 +17,7 @@ import numpy as np
 from app.chunker import FACT_TAG_PATTERNS, Chunk, numbers_in
 from app.config import Settings, get_settings
 from app.index import BgeEmbedder, CorpusIndex, Embedder, keyword_tokens, load_index, passage_text
-from app.query import QueryAnalysis, SchemeMatch, analyse_query
+from app.query import ConversationContext, QueryAnalysis, SchemeMatch, analyse_query
 from app.registry import SourceRegistry, load_registry
 
 CANDIDATES_PER_RETRIEVER = 30
@@ -192,9 +192,9 @@ def search_query(analysis: QueryAnalysis, scheme_id: str | None, registry: Sourc
     if scheme_id is None:
         return analysis.query
     scheme_name = registry.scheme_map[scheme_id].scheme_name
-    if len(analysis.schemes) > 1 and analysis.facts:
-        return f"What is the {' and '.join(FACT_LABELS[fact] for fact in analysis.facts)} of {scheme_name}?"
     match = next(m for m in analysis.schemes if m.scheme_id == scheme_id)
+    if (len(analysis.schemes) > 1 or match.from_context) and analysis.facts:
+        return f"What is the {' and '.join(FACT_LABELS[fact] for fact in analysis.facts)} of {scheme_name}?"
     rewritten = re.sub(r"\s+".join(map(re.escape, match.matched_text.split())), scheme_name, analysis.query, count=1, flags=re.IGNORECASE)
     # Matching works on normalised text ("large and mid cap"); fall back to appending the name.
     return rewritten if scheme_name in rewritten else f"{analysis.query} ({scheme_name})"
@@ -376,8 +376,8 @@ class Retriever:
         source = self.sources.get(f"{scheme_ids[0]}_factsheet")
         return str(source.official_url) if source and source.status == "approved" else None
 
-    def retrieve(self, query: object) -> RetrievalResult:
-        analysis = analyse_query(query, self.registry)
+    def retrieve(self, query: object, context: ConversationContext | None = None) -> RetrievalResult:
+        analysis = analyse_query(query, self.registry, context)
         if analysis.route == "invalid":
             return RetrievalResult("invalid", analysis, reason=analysis.reason)
         if analysis.route == "out_of_scope":

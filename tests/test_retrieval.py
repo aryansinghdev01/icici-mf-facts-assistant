@@ -176,6 +176,8 @@ def test_ambiguous_and_out_of_scope_questions_skip_retrieval() -> None:
         ("large and midcap expense ratio", ["icici_large_mid_cap"], "retrieve"),
         ("ICICI Midcap exit load", [], "out_of_scope"),
         ("ICICI US Bluechip expense ratio", ["icici_large_cap"], "out_of_scope"),
+        ("tell me about the silver etf", ["icici_silver_etf_fof"], "retrieve"),
+        ("silver etf FOF", ["icici_silver_etf_fof"], "retrieve"),
         ("What is the net asset value of smallcap?", ["icici_smallcap"], "retrieve"),
         ("x" * 501 + " exit load", [], "invalid"),
     ],
@@ -288,3 +290,13 @@ def test_overview_gates_each_fact_and_rejects_references_instead_of_statements()
 def test_scheme_without_a_recognised_fact_is_not_verified() -> None:
     result = retriever([chunk("icici_flexicap_kim", "Exit load: 1% within 12 months.", day=OLD)]).retrieve("What colour is the ICICI Flexicap logo?")
     assert (result.status, result.reason) == ("unverified", "fact_not_recognised")
+
+
+def test_naming_the_same_scheme_again_gives_its_overview_not_the_previous_fact() -> None:
+    from app.query import ConversationContext
+
+    registry_ = load_registry()
+    previous = ConversationContext(("icici_silver_etf_fof",), ("expense_ratio",))
+    assert analyse_query("Silver ETF FoF", registry_, previous).overview
+    switched = analyse_query("and Large Cap?", registry_, ConversationContext(("icici_flexicap",), ("exit_load",)))
+    assert (switched.scheme_ids, switched.facts) == (["icici_large_cap"], ["exit_load"])
