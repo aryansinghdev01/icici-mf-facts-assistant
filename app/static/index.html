@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MF Facts Assistant</title>
+  <meta name="description" content="Facts-only answers about five ICICI Prudential mutual fund schemes, cited from official documents.">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <p class="eyebrow">ICICI Prudential Mutual Fund · Official documents only</p>
+      <h1>Mutual Fund Facts Assistant</h1>
+      <p class="welcome">Hi! Ask me a factual question, such as an expense ratio, exit load, minimum SIP, benchmark or riskometer, about
+        ICICI Prudential <strong>Silver ETF FoF</strong>, <strong>Large Cap</strong>, <strong>Large &amp; Mid Cap</strong>,
+        <strong>Flexicap</strong> or <strong>Smallcap</strong> Fund. Every answer links to its official source.</p>
+      <p class="disclaimer" role="note"><span aria-hidden="true">ⓘ</span> Facts-only. No investment advice.</p>
+    </header>
+
+    <main>
+      <section class="examples" aria-labelledby="examples-title">
+        <h2 id="examples-title">Try an example</h2>
+        <div class="example-list">
+          <button type="button" class="example">What is the exit load of ICICI Prudential Flexicap Fund?</button>
+          <button type="button" class="example">What is the expense ratio of ICICI Prudential Large Cap Fund?</button>
+          <button type="button" class="example">What is the riskometer level of ICICI Prudential Silver ETF FoF?</button>
+        </div>
+      </section>
+
+      <div id="thread" class="thread" aria-live="polite" aria-relevant="additions"></div>
+
+      <form id="ask-form" class="ask" novalidate>
+        <label for="question" class="visually-hidden">Your question</label>
+        <textarea id="question" name="question" rows="2" maxlength="500" autocomplete="off" spellcheck="true"
+          placeholder="e.g. What is the minimum SIP for ICICI Prudential Smallcap Fund?" required></textarea>
+        <div class="ask-footer">
+          <span class="hint">Please don't enter PAN, Aadhaar, account numbers, OTPs, email or phone. <span id="count" class="count">0/500</span></span>
+          <button type="submit" id="submit" class="submit">Ask</button>
+        </div>
+      </form>
+      <noscript><p class="noscript">This assistant needs JavaScript enabled to send questions.</p></noscript>
+    </main>
+
+    <footer class="footer">
+      <p>Answers come only from official ICICI Prudential AMC, SEBI and AMFI documents, and are limited to three sentences.
+        The assistant can't access accounts, recommend funds, or calculate returns. <a href="/api/sources" target="_blank" rel="noopener noreferrer">See all sources</a></p>
+    </footer>
+  </div>
+</body>
+</html>
